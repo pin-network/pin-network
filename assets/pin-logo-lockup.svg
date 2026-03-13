@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 290 120" width="290" height="120">
+  <!-- PiN - Pi Integrated Network — full lockup with wordmark -->
+  <!-- P stem -->
+  <line x1="20" y1="20" x2="20" y2="86" stroke="#7F77DD" stroke-width="6.5" stroke-linecap="round"/>
+  <!-- P bowl -->
+  <path d="M20 20 Q60 20 60 43 Q60 64 20 62" fill="none" stroke="#7F77DD" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- pi crossbar gentle arc -->
+  <path d="M46 42 Q100 49 152 42" fill="none" stroke="#7F77DD" stroke-width="6.5" stroke-linecap="round"/>
+  <!-- left leg / i -->
+  <line x1="68" y1="44" x2="68" y2="88" stroke="#7F77DD" stroke-width="6.5" stroke-linecap="round"/>
+  <!-- dot over left leg -->
+  <circle cx="68" cy="22" r="7.5" fill="#AFA9EC"/>
+  <!-- right leg serif foot -->
+  <line x1="130" y1="43" x2="130" y2="88" stroke="#7F77DD" stroke-width="6.5" stroke-linecap="round"/>
+  <line x1="120" y1="88" x2="140" y2="88" stroke="#7F77DD" stroke-width="3.5" stroke-linecap="round"/>
+  <!-- signal bars -->
+  <rect x="156" y="33" width="5.5" height="11" rx="2" fill="#CECBF6"/>
+  <rect x="165" y="24" width="5.5" height="20" rx="2" fill="#AFA9EC"/>
+  <rect x="174" y="14" width="5.5" height="30" rx="2" fill="#7F77DD"/>
+  <!-- rule -->
+  <line x1="20" y1="101" x2="179" y2="101" stroke="#CECBF6" stroke-width="0.8"/>
+  <!-- wordmark — rendered as paths approximated with text for portability -->
+  <text x="99" y="115" text-anchor="middle" font-size="10" font-weight="400"
+        fill="#7F77DD" font-family="system-ui, -apple-system, sans-serif"
+        letter-spacing="4">PI INTEGRATED NETWORK</text>
+</svg>
