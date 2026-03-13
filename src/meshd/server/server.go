@@ -82,10 +82,11 @@ func (a *API) handlePeers(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, PeersResponse{Count: len(peers), Peers: peers})
 }
 
-// LedgerResponse is the response for GET /api/v1/ledger.
 type LedgerResponse struct {
-	Balance     float64 `json:"balance_hashes"`
-	BytesServed int64   `json:"bytes_served_today"`
+	Balance       float64 `json:"balance_hashes"`
+	BytesServed   int64   `json:"bytes_served_today"`
+	UptimeMinutes int64   `json:"uptime_minutes_today"`
+	UptimePct     float64 `json:"uptime_pct_today"`
 }
 
 func (a *API) handleLedger(w http.ResponseWriter, r *http.Request) {
@@ -106,9 +107,17 @@ func (a *API) handleLedger(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	uptimeMinutes, err := a.db.UptimeToday()
+	if err != nil {
+		http.Error(w, "ledger error", http.StatusInternalServerError)
+		return
+	}
+
 	writeJSON(w, LedgerResponse{
-		Balance:     balance,
-		BytesServed: bytesServed,
+		Balance:       balance,
+		BytesServed:   bytesServed,
+		UptimeMinutes: uptimeMinutes,
+		UptimePct:     float64(uptimeMinutes) / 14.40,
 	})
 }
 

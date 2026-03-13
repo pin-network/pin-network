@@ -108,11 +108,24 @@ func main() {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
+	// Record node start in uptime ledger
+	uptimeID, err := db.RecordStart()
+	if err != nil {
+		log.Printf("warning: could not record uptime start: %v", err)
+	}
+
 	select {
 	case sig := <-sigCh:
 		log.Printf("received signal %v, shutting down", sig)
 	case <-ctx.Done():
 		log.Println("context cancelled, shutting down")
+	}
+
+	// Record node stop in uptime ledger
+	if uptimeID > 0 {
+		if err := db.RecordStop(uptimeID); err != nil {
+			log.Printf("warning: could not record uptime stop: %v", err)
+		}
 	}
 
 	log.Println("meshd stopped")

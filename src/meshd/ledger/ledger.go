@@ -174,3 +174,50 @@ func epochID(t time.Time) int64 {
 func epochStart(epoch int64) int64 {
 	return epoch * 86400
 }
+
+// RecordStart records the node coming online and returns the uptime record ID.
+func (d *DB) RecordStart() (int64, error) {
+	result, err := d.sql.Exec(`
+		INSERT INTO node_uptime (started_at) VALUES (?)`,
+		time.Now().Unix(),
+	)
+	if err != nil {
+		return 0, fmt.Errorf("recording uptime start: %w", err)
+	}
+	id, err := result.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	return id, nil
+}
+
+// RecordStop records the node going offline.
+func (d *DB) RecordStop(id int64) error {
+	_, err := d.sql.Exec(`
+		UPDATE node_uptime SET stopped_at = ? WHERE id = ?`,
+		time.Now().Unix(), id,
+	)
+	if err != nil {
+		return fmt.Errorf("recording uptime stop: %w", err)
+	}
+	return nil
+}
+
+// UptimeToday returns the number of minutes the node has been online today.
+func (d *DB) UptimeToday() (int64, error) {
+	today := epochStart(epochID(time.Now()))
+	now := time.Now().Unix()
+	var minutes int64
+	err := d.sql.QueryRow(`
+		SELECT COALESCE(SUM(
+			(MIN(COALESCE(stopped_at, ?), ?) - MAX(started_at, ?)) / 60
+		), 0)
+		FROM node_uptime
+		WHERE started_at < ? AND (stopped_at IS NULL OR stopped_at > ?)`,
+		now, now, today, now, today,
+	).Scan(&minutes)
+	if err != nil {
+		return 0, fmt.Errorf("querying uptime: %w", err)
+	}
+	return minutes, nil
+}
