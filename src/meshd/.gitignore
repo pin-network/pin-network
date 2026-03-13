@@ -1,0 +1,16 @@
+# Compiled binaries
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Go build cache
+*.test
+*.out
+
+# Local config and data
+.pin/
+
+# IDE
+.vscode/
+*.swp
