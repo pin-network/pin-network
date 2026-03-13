@@ -77,6 +77,9 @@ func main() {
 	}
 	defer db.Close()
 
+	// Start the epoch Hash calculator
+	db.StartEpochCalculator(ctx, cfg.Node.Tier)
+
 	// Initialise the PiN node (libp2p host + DHT)
 	n, err := node.New(ctx, cfg, db)
 	if err != nil {
