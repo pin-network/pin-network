@@ -222,3 +222,13 @@ func generateAndSaveIdentity(path string) (crypto.PrivKey, error) {
 
 	return privKey, nil
 }
+
+// Peers returns the list of currently connected peer IDs.
+func (n *Node) Peers() []string {
+	peers := n.host.Network().Peers()
+	result := make([]string, 0, len(peers))
+	for _, p := range peers {
+		result = append(result, p.String())
+	}
+	return result
+}

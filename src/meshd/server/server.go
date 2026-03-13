@@ -78,7 +78,8 @@ func (a *API) handlePeers(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	writeJSON(w, PeersResponse{Count: 0, Peers: []string{}})
+	peers := a.node.Peers()
+	writeJSON(w, PeersResponse{Count: len(peers), Peers: peers})
 }
 
 // LedgerResponse is the response for GET /api/v1/ledger.
