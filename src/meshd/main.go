@@ -1,6 +1,6 @@
 // meshd — PiN node daemon
 // Pi Integrated Network
-// https://github.com/justj1979/pin-network
+// https://github.com/pin-network/pin-network
 //
 // meshd is the core daemon that runs on every PiN node. It handles:
 //   - Peer discovery via Kademlia DHT (libp2p)
@@ -20,10 +20,10 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/justj1979/pin-network/src/meshd/config"
-	"github.com/justj1979/pin-network/src/meshd/ledger"
-	"github.com/justj1979/pin-network/src/meshd/node"
-	"github.com/justj1979/pin-network/src/meshd/server"
+	"meshd/config"
+	"meshd/ledger"
+	"meshd/node"
+	"meshd/server"
 )
 
 var (
@@ -33,9 +33,7 @@ var (
 	version    = flag.Bool("version", false, "Print version and exit")
 )
 
-const (
-	Version = "0.1.0-dev"
-)
+const Version = "0.1.0-dev"
 
 func main() {
 	flag.Parse()
@@ -43,7 +41,7 @@ func main() {
 	if *version {
 		fmt.Printf("meshd version %s\n", Version)
 		fmt.Println("PiN — Pi Integrated Network")
-		fmt.Println("https://github.com/justj1979/pin-network")
+		fmt.Println("https://github.com/pin-network/pin-network")
 		os.Exit(0)
 	}
 
