@@ -47,6 +47,7 @@ type NetworkConfig struct {
 	EnableUPnP     bool     `yaml:"enable_upnp"`
 	EnableRelay    bool     `yaml:"enable_relay"`
 	BootstrapNodes []string `yaml:"bootstrap_nodes"`
+	PeerAPIs       []string `yaml:"peer_apis"`
 }
 
 // LimitsConfig defines resource limits for this node.

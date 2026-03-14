@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"strings"
 
 	"meshd/config"
+	"meshd/fetcher"
 	"meshd/ledger"
 	"meshd/node"
 	"meshd/store"
@@ -17,21 +19,23 @@ import (
 
 // API is the local HTTP API server.
 type API struct {
-	cfg   *config.Config
-	node  *node.Node
-	db    *ledger.DB
-	store *store.Store
-	mux   *http.ServeMux
+	cfg     *config.Config
+	node    *node.Node
+	db      *ledger.DB
+	store   *store.Store
+	fetcher *fetcher.Fetcher
+	mux     *http.ServeMux
 }
 
 // NewAPI creates a new API server.
 func NewAPI(cfg *config.Config, n *node.Node, db *ledger.DB, st *store.Store) *API {
 	a := &API{
-		cfg:   cfg,
-		node:  n,
-		db:    db,
-		store: st,
-		mux:   http.NewServeMux(),
+		cfg:     cfg,
+		node:    n,
+		db:      db,
+		store:   st,
+		fetcher: fetcher.New(),
+		mux:     http.NewServeMux(),
 	}
 	a.registerRoutes()
 	return a
@@ -109,13 +113,11 @@ func (a *API) handleLedger(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "ledger error", http.StatusInternalServerError)
 		return
 	}
-
 	bytesServed, err := a.db.BytesServedToday()
 	if err != nil {
 		http.Error(w, "ledger error", http.StatusInternalServerError)
 		return
 	}
-
 	uptimeMinutes, err := a.db.UptimeToday()
 	if err != nil {
 		http.Error(w, "ledger error", http.StatusInternalServerError)
@@ -143,7 +145,6 @@ type ContentPutResponse struct {
 	Bytes int    `json:"bytes"`
 }
 
-// handleContent handles GET (list) and POST (store) for /api/v1/content.
 func (a *API) handleContent(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
@@ -157,11 +158,7 @@ func (a *API) handleContent(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "store error", http.StatusInternalServerError)
 			return
 		}
-		writeJSON(w, ContentListResponse{
-			Count: len(cids),
-			CIDs:  cids,
-			Bytes: size,
-		})
+		writeJSON(w, ContentListResponse{Count: len(cids), CIDs: cids, Bytes: size})
 
 	case http.MethodPost:
 		data, err := io.ReadAll(io.LimitReader(r.Body, 50*1024*1024))
@@ -173,13 +170,11 @@ func (a *API) handleContent(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "empty body", http.StatusBadRequest)
 			return
 		}
-
 		cid, err := a.store.Put(data)
 		if err != nil {
 			http.Error(w, "store error", http.StatusInternalServerError)
 			return
 		}
-
 		writeJSON(w, ContentPutResponse{CID: cid, Bytes: len(data)})
 
 	default:
@@ -187,7 +182,6 @@ func (a *API) handleContent(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleContentGet handles GET /api/v1/content/{cid}
 func (a *API) handleContentGet(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -200,14 +194,34 @@ func (a *API) handleContentGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Try local store first
 	data, err := a.store.Get(cid)
 	if err != nil {
-		if err == os.ErrNotExist {
+		if err != os.ErrNotExist {
+			http.Error(w, "store error", http.StatusInternalServerError)
+			return
+		}
+
+		// Not found locally — try peers
+		if len(a.cfg.Network.PeerAPIs) > 0 {
+			log.Printf("CID %s not found locally, trying %d peers", cid[:8], len(a.cfg.Network.PeerAPIs))
+			data, _, err = a.fetcher.FetchFromPeers(a.cfg.Network.PeerAPIs, cid)
+			if err != nil {
+				log.Printf("peer fetch failed for CID %s: %v", cid[:8], err)
+				http.Error(w, "not found", http.StatusNotFound)
+				return
+			}
+
+			// Cache locally for future requests
+			if _, cacheErr := a.store.Put(data); cacheErr != nil {
+				log.Printf("warning: could not cache CID %s: %v", cid[:8], cacheErr)
+			} else {
+				log.Printf("cached CID %s from peer (%d bytes)", cid[:8], len(data))
+			}
+		} else {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
-		http.Error(w, "store error", http.StatusInternalServerError)
-		return
 	}
 
 	contentType := http.DetectContentType(data)
@@ -217,7 +231,6 @@ func (a *API) handleContentGet(w http.ResponseWriter, r *http.Request) {
 	w.Write(data)
 }
 
-// writeJSON writes a JSON response with correct headers.
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Access-Control-Allow-Origin", "http://127.0.0.1")
