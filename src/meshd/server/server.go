@@ -43,7 +43,7 @@ func NewAPI(cfg *config.Config, n *node.Node, db *ledger.DB, st *store.Store) *A
 
 // ListenAndServe starts the API server on the configured port.
 func (a *API) ListenAndServe() error {
-	addr := fmt.Sprintf("127.0.0.1:%d", a.cfg.Network.APIPort)
+	addr := fmt.Sprintf("0.0.0.0:%d", a.cfg.Network.APIPort)
 	return http.ListenAndServe(addr, a.mux)
 }
 
