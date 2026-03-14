@@ -1,13 +1,6 @@
 // meshd — PiN node daemon
 // Pi Integrated Network
 // https://github.com/pin-network/pin-network
-//
-// meshd is the core daemon that runs on every PiN node. It handles:
-//   - Peer discovery via Kademlia DHT (libp2p)
-//   - Content-addressed file serving
-//   - Incoming request routing and proxying
-//   - Local proof-of-service ledger
-//   - Resource limit enforcement
 
 package main
 
@@ -24,6 +17,7 @@ import (
 	"meshd/ledger"
 	"meshd/node"
 	"meshd/server"
+	"meshd/store"
 )
 
 var (
@@ -45,7 +39,6 @@ func main() {
 		os.Exit(0)
 	}
 
-	// Load configuration
 	cfg, err := config.Load(*configPath)
 	if err != nil {
 		log.Fatalf("failed to load config: %v", err)
@@ -56,7 +49,6 @@ func main() {
 		log.Println("running in development mode")
 	}
 
-	// Initialise a new node identity and data directory
 	if *initMode {
 		if err := node.Init(cfg); err != nil {
 			log.Fatalf("failed to initialise node: %v", err)
@@ -77,8 +69,14 @@ func main() {
 	}
 	defer db.Close()
 
-	// Start the epoch Hash calculator
+	// Start epoch Hash calculator
 	db.StartEpochCalculator(ctx, cfg.Node.Tier)
+
+	// Initialise content store
+	st, err := store.New(cfg.StorePath())
+	if err != nil {
+		log.Fatalf("failed to open store: %v", err)
+	}
 
 	// Initialise the PiN node (libp2p host + DHT)
 	n, err := node.New(ctx, cfg, db)
@@ -92,8 +90,8 @@ func main() {
 	log.Printf("  Storage: %s (limit %dGB)", cfg.Node.StoragePath, cfg.Node.StorageLimitGB)
 	log.Printf("  Listen:  %v", n.Addrs())
 
-	// Start the local API server (used by browser and tray app)
-	api := server.NewAPI(cfg, n, db)
+	// Start the local API server
+	api := server.NewAPI(cfg, n, db, st)
 	go func() {
 		if err := api.ListenAndServe(); err != nil {
 			log.Printf("API server error: %v", err)
@@ -107,15 +105,15 @@ func main() {
 		log.Println("continuing — will retry peer discovery in background")
 	}
 
-	// Handle shutdown signals gracefully
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-
-	// Record node start in uptime ledger
+	// Record uptime start
 	uptimeID, err := db.RecordStart()
 	if err != nil {
 		log.Printf("warning: could not record uptime start: %v", err)
 	}
+
+	// Handle shutdown signals
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
 	select {
 	case sig := <-sigCh:
@@ -124,7 +122,6 @@ func main() {
 		log.Println("context cancelled, shutting down")
 	}
 
-	// Record node stop in uptime ledger
 	if uptimeID > 0 {
 		if err := db.RecordStop(uptimeID); err != nil {
 			log.Printf("warning: could not record uptime stop: %v", err)

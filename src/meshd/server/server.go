@@ -4,28 +4,34 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"os"
+	"strings"
 
 	"meshd/config"
 	"meshd/ledger"
 	"meshd/node"
+	"meshd/store"
 )
 
 // API is the local HTTP API server.
 type API struct {
-	cfg  *config.Config
-	node *node.Node
-	db   *ledger.DB
-	mux  *http.ServeMux
+	cfg   *config.Config
+	node  *node.Node
+	db    *ledger.DB
+	store *store.Store
+	mux   *http.ServeMux
 }
 
 // NewAPI creates a new API server.
-func NewAPI(cfg *config.Config, n *node.Node, db *ledger.DB) *API {
+func NewAPI(cfg *config.Config, n *node.Node, db *ledger.DB, st *store.Store) *API {
 	a := &API{
-		cfg:  cfg,
-		node: n,
-		db:   db,
-		mux:  http.NewServeMux(),
+		cfg:   cfg,
+		node:  n,
+		db:    db,
+		store: st,
+		mux:   http.NewServeMux(),
 	}
 	a.registerRoutes()
 	return a
@@ -42,6 +48,8 @@ func (a *API) registerRoutes() {
 	a.mux.HandleFunc("/api/v1/status", a.handleStatus)
 	a.mux.HandleFunc("/api/v1/peers", a.handlePeers)
 	a.mux.HandleFunc("/api/v1/ledger", a.handleLedger)
+	a.mux.HandleFunc("/api/v1/content", a.handleContent)
+	a.mux.HandleFunc("/api/v1/content/", a.handleContentGet)
 }
 
 // StatusResponse is the response for GET /api/v1/status.
@@ -82,6 +90,7 @@ func (a *API) handlePeers(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, PeersResponse{Count: len(peers), Peers: peers})
 }
 
+// LedgerResponse is the response for GET /api/v1/ledger.
 type LedgerResponse struct {
 	Balance       float64 `json:"balance_hashes"`
 	BytesServed   int64   `json:"bytes_served_today"`
@@ -119,6 +128,93 @@ func (a *API) handleLedger(w http.ResponseWriter, r *http.Request) {
 		UptimeMinutes: uptimeMinutes,
 		UptimePct:     float64(uptimeMinutes) / 14.40,
 	})
+}
+
+// ContentListResponse is the response for GET /api/v1/content.
+type ContentListResponse struct {
+	Count int      `json:"count"`
+	CIDs  []string `json:"cids"`
+	Bytes int64    `json:"total_bytes"`
+}
+
+// ContentPutResponse is the response for POST /api/v1/content.
+type ContentPutResponse struct {
+	CID   string `json:"cid"`
+	Bytes int    `json:"bytes"`
+}
+
+// handleContent handles GET (list) and POST (store) for /api/v1/content.
+func (a *API) handleContent(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		cids, err := a.store.List()
+		if err != nil {
+			http.Error(w, "store error", http.StatusInternalServerError)
+			return
+		}
+		size, err := a.store.Size()
+		if err != nil {
+			http.Error(w, "store error", http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, ContentListResponse{
+			Count: len(cids),
+			CIDs:  cids,
+			Bytes: size,
+		})
+
+	case http.MethodPost:
+		data, err := io.ReadAll(io.LimitReader(r.Body, 50*1024*1024))
+		if err != nil {
+			http.Error(w, "reading body", http.StatusBadRequest)
+			return
+		}
+		if len(data) == 0 {
+			http.Error(w, "empty body", http.StatusBadRequest)
+			return
+		}
+
+		cid, err := a.store.Put(data)
+		if err != nil {
+			http.Error(w, "store error", http.StatusInternalServerError)
+			return
+		}
+
+		writeJSON(w, ContentPutResponse{CID: cid, Bytes: len(data)})
+
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleContentGet handles GET /api/v1/content/{cid}
+func (a *API) handleContentGet(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	cid := strings.TrimPrefix(r.URL.Path, "/api/v1/content/")
+	if cid == "" {
+		http.Error(w, "missing CID", http.StatusBadRequest)
+		return
+	}
+
+	data, err := a.store.Get(cid)
+	if err != nil {
+		if err == os.ErrNotExist {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		http.Error(w, "store error", http.StatusInternalServerError)
+		return
+	}
+
+	contentType := http.DetectContentType(data)
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("X-Content-CID", cid)
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Write(data)
 }
 
 // writeJSON writes a JSON response with correct headers.
