@@ -58,9 +58,6 @@ type LimitsConfig struct {
 	WiFiOnly      bool `yaml:"wifi_only"`
 }
 
-// Load reads the config file from the given path.
-// If path is empty it looks for ~/.pin/config.yaml.
-// If no file exists, it returns a default configuration.
 func Load(path string) (*Config, error) {
 	if path == "" {
 		home, err := os.UserHomeDir()
@@ -91,13 +88,11 @@ func Load(path string) (*Config, error) {
 	return cfg, nil
 }
 
-// LedgerPath returns the path to the SQLite ledger database.
 func (c *Config) LedgerPath() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".pin", "ledger.db")
 }
 
-// StorePath returns the path to the content store directory.
 func (c *Config) StorePath() string {
 	if c.Node.StoragePath != "" {
 		return c.Node.StoragePath
@@ -106,7 +101,6 @@ func (c *Config) StorePath() string {
 	return filepath.Join(home, ".pin", "store")
 }
 
-// defaultConfig returns a safe default configuration.
 func defaultConfig() *Config {
 	home, _ := os.UserHomeDir()
 	return &Config{
@@ -137,7 +131,6 @@ func defaultConfig() *Config {
 	}
 }
 
-// validate checks that the configuration values are sensible.
 func (c *Config) validate() error {
 	if c.Node.Tier < 1 || c.Node.Tier > 3 {
 		return fmt.Errorf("node.tier must be 1, 2, or 3 (got %d)", c.Node.Tier)

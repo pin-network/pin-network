@@ -97,7 +97,7 @@ func main() {
 			log.Printf("API server error: %v", err)
 		}
 	}()
-	log.Printf("  API:     http://127.0.0.1:%d", cfg.Network.APIPort)
+	log.Printf("  API:     http://0.0.0.0:%d", cfg.Network.APIPort)
 
 	// Bootstrap into the network
 	if err := n.Bootstrap(ctx); err != nil {
