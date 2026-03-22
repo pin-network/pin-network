@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 // DB wraps the SQLite database connection.
@@ -42,7 +42,7 @@ func Open(path string) (*DB, error) {
 		return nil, fmt.Errorf("creating ledger directory: %w", err)
 	}
 
-	db, err := sql.Open("sqlite3", path+"?_journal_mode=WAL")
+	db, err := sql.Open("sqlite", path+"?_journal_mode=WAL")
 	if err != nil {
 		return nil, fmt.Errorf("opening ledger database: %w", err)
 	}
