@@ -32,6 +32,12 @@ type ScheduleConfig struct {
 	AlwaysOn         bool          `yaml:"always_on"`
 	ActiveHours      []ActiveHours `yaml:"active_hours"`
 	HeavyTasksDuring string        `yaml:"heavy_tasks_only_during"`
+	// IdleThresholdPct controls dynamic resource ramping.
+	// When the node is using less than this percentage of its allocated
+	// resources, it is considered idle and may use more capacity.
+	// Set to 0 to disable idle ramping entirely.
+	// Default: 20 (ramp up when using less than 20% of allocation)
+	IdleThresholdPct int `yaml:"idle_threshold_pct"`
 }
 
 // ActiveHours defines a time window for hosting.
@@ -112,7 +118,8 @@ func defaultConfig() *Config {
 			BandwidthMbps:  5,
 		},
 		Schedule: ScheduleConfig{
-			AlwaysOn: true,
+			AlwaysOn:         true,
+			IdleThresholdPct: 20,
 		},
 		Network: NetworkConfig{
 			ListenPort:  4001,

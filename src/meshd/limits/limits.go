@@ -10,6 +10,7 @@ package limits
 import (
 	"context"
 	"fmt"
+	"log"
 	"runtime/debug"
 	"sync"
 	"time"
@@ -167,4 +168,33 @@ func (tb *tokenBucket) refill() {
 	if tb.tokens > tb.capacity {
 		tb.tokens = tb.capacity
 	}
+}
+
+// UpdateConfig applies a new configuration to the limiter.
+// Called by the config watcher when the config file changes.
+func (l *Limiter) UpdateConfig(cfg *config.Config) {
+	// Update memory limit
+	if cfg.Limits.RAMMB > 0 {
+		memLimit := int64(cfg.Limits.RAMMB) * 1024 * 1024
+		debug.SetMemoryLimit(memLimit)
+	}
+
+	// Update bandwidth limiter
+	bytesPerSec := int64(cfg.Limits.BandwidthMbps) * 125000
+	if bytesPerSec > 0 {
+		l.bandwidth = newTokenBucket(bytesPerSec)
+	}
+
+	// Update concurrency limit
+	maxConcurrent := (cfg.Limits.CPUPercent * 16) / 100
+	if maxConcurrent < 1 {
+		maxConcurrent = 1
+	}
+	// Resize the concurrency channel if needed
+	if cap(l.concurrency) != maxConcurrent {
+		l.concurrency = make(chan struct{}, maxConcurrent)
+	}
+
+	l.cfg = cfg
+	log.Println("limits: config updated")
 }

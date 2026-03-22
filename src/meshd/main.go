@@ -90,6 +90,13 @@ func main() {
 	sched := scheduler.New(cfg)
 	sched.Start(ctx)
 
+	// Watch config file for changes — allows app to update settings at runtime
+	configWatcher := config.NewWatcher(*configPath, func(newCfg *config.Config) {
+		sched.UpdateConfig(newCfg)
+		limiter.UpdateConfig(newCfg)
+	})
+	configWatcher.Start(ctx)
+
 	// Initialise the PiN node (libp2p host + DHT)
 	n, err := node.New(ctx, cfg, db)
 	if err != nil {
@@ -102,6 +109,7 @@ func main() {
 	log.Printf("  Storage:  %s (limit %dGB)", cfg.Node.StoragePath, cfg.Node.StorageLimitGB)
 	log.Printf("  Listen:   %v", n.Addrs())
 	log.Printf("  Schedule: always_on=%v", cfg.Schedule.AlwaysOn)
+	log.Printf("  Config:   watching for changes every 30s")
 
 	// Start the local API server
 	api := server.NewAPI(cfg, n, db, st, sched, limiter)
