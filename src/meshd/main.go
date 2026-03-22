@@ -56,7 +56,6 @@ func main() {
 
 	// Initialise resource limiter
 	limiter := limits.New(cfg)
-	_ = limiter // will be passed to server in next step
 
 	if *initMode {
 		if err := node.Init(cfg); err != nil {
@@ -105,7 +104,7 @@ func main() {
 	log.Printf("  Schedule: always_on=%v", cfg.Schedule.AlwaysOn)
 
 	// Start the local API server
-	api := server.NewAPI(cfg, n, db, st, sched)
+	api := server.NewAPI(cfg, n, db, st, sched, limiter)
 	go func() {
 		if err := api.ListenAndServe(); err != nil {
 			log.Printf("API server error: %v", err)

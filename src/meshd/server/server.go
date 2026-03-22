@@ -13,6 +13,7 @@ import (
 	"meshd/config"
 	"meshd/fetcher"
 	"meshd/ledger"
+	"meshd/limits"
 	"meshd/node"
 	"meshd/scheduler"
 	"meshd/store"
@@ -27,10 +28,11 @@ type API struct {
 	fetcher   *fetcher.Fetcher
 	scheduler *scheduler.Scheduler
 	mux       *http.ServeMux
+	limiter   *limits.Limiter
 }
 
 // NewAPI creates a new API server.
-func NewAPI(cfg *config.Config, n *node.Node, db *ledger.DB, st *store.Store, sched *scheduler.Scheduler) *API {
+func NewAPI(cfg *config.Config, n *node.Node, db *ledger.DB, st *store.Store, sched *scheduler.Scheduler, lim *limits.Limiter) *API {
 	a := &API{
 		cfg:       cfg,
 		node:      n,
@@ -38,6 +40,7 @@ func NewAPI(cfg *config.Config, n *node.Node, db *ledger.DB, st *store.Store, sc
 		store:     st,
 		fetcher:   fetcher.New(),
 		scheduler: sched,
+		limiter:   lim,
 		mux:       http.NewServeMux(),
 	}
 	a.registerRoutes()
@@ -198,6 +201,13 @@ func (a *API) handleContentGet(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "node is idle", http.StatusServiceUnavailable)
 		return
 	}
+
+	// Acquire concurrency slot
+	if err := a.limiter.Acquire(r.Context()); err != nil {
+		http.Error(w, "server busy", http.StatusServiceUnavailable)
+		return
+	}
+	defer a.limiter.Release()
 
 	cid := strings.TrimPrefix(r.URL.Path, "/api/v1/content/")
 	if cid == "" {
