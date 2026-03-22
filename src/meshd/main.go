@@ -16,6 +16,7 @@ import (
 	"meshd/config"
 	"meshd/ledger"
 	"meshd/node"
+	"meshd/scheduler"
 	"meshd/server"
 	"meshd/store"
 )
@@ -78,6 +79,10 @@ func main() {
 		log.Fatalf("failed to open store: %v", err)
 	}
 
+	// Start scheduler
+	sched := scheduler.New(cfg)
+	sched.Start(ctx)
+
 	// Initialise the PiN node (libp2p host + DHT)
 	n, err := node.New(ctx, cfg, db)
 	if err != nil {
@@ -85,19 +90,20 @@ func main() {
 	}
 
 	log.Printf("PiN node started")
-	log.Printf("  NodeID:  %s", n.ID())
-	log.Printf("  Tier:    %d", cfg.Node.Tier)
-	log.Printf("  Storage: %s (limit %dGB)", cfg.Node.StoragePath, cfg.Node.StorageLimitGB)
-	log.Printf("  Listen:  %v", n.Addrs())
+	log.Printf("  NodeID:   %s", n.ID())
+	log.Printf("  Tier:     %d", cfg.Node.Tier)
+	log.Printf("  Storage:  %s (limit %dGB)", cfg.Node.StoragePath, cfg.Node.StorageLimitGB)
+	log.Printf("  Listen:   %v", n.Addrs())
+	log.Printf("  Schedule: always_on=%v", cfg.Schedule.AlwaysOn)
 
 	// Start the local API server
-	api := server.NewAPI(cfg, n, db, st)
+	api := server.NewAPI(cfg, n, db, st, sched)
 	go func() {
 		if err := api.ListenAndServe(); err != nil {
 			log.Printf("API server error: %v", err)
 		}
 	}()
-	log.Printf("  API:     http://0.0.0.0:%d", cfg.Network.APIPort)
+	log.Printf("  API:      http://0.0.0.0:%d", cfg.Network.APIPort)
 
 	// Bootstrap into the network
 	if err := n.Bootstrap(ctx); err != nil {

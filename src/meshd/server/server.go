@@ -14,28 +14,31 @@ import (
 	"meshd/fetcher"
 	"meshd/ledger"
 	"meshd/node"
+	"meshd/scheduler"
 	"meshd/store"
 )
 
 // API is the local HTTP API server.
 type API struct {
-	cfg     *config.Config
-	node    *node.Node
-	db      *ledger.DB
-	store   *store.Store
-	fetcher *fetcher.Fetcher
-	mux     *http.ServeMux
+	cfg       *config.Config
+	node      *node.Node
+	db        *ledger.DB
+	store     *store.Store
+	fetcher   *fetcher.Fetcher
+	scheduler *scheduler.Scheduler
+	mux       *http.ServeMux
 }
 
 // NewAPI creates a new API server.
-func NewAPI(cfg *config.Config, n *node.Node, db *ledger.DB, st *store.Store) *API {
+func NewAPI(cfg *config.Config, n *node.Node, db *ledger.DB, st *store.Store, sched *scheduler.Scheduler) *API {
 	a := &API{
-		cfg:     cfg,
-		node:    n,
-		db:      db,
-		store:   st,
-		fetcher: fetcher.New(),
-		mux:     http.NewServeMux(),
+		cfg:       cfg,
+		node:      n,
+		db:        db,
+		store:     st,
+		fetcher:   fetcher.New(),
+		scheduler: sched,
+		mux:       http.NewServeMux(),
 	}
 	a.registerRoutes()
 	return a
@@ -63,6 +66,7 @@ type StatusResponse struct {
 	Addrs   []string `json:"addrs"`
 	Version string   `json:"version"`
 	Online  bool     `json:"online"`
+	Active  bool     `json:"active"`
 }
 
 func (a *API) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -76,6 +80,7 @@ func (a *API) handleStatus(w http.ResponseWriter, r *http.Request) {
 		Addrs:   a.node.Addrs(),
 		Version: "0.1.0-dev",
 		Online:  true,
+		Active:  a.scheduler.Active(),
 	})
 }
 
@@ -185,6 +190,12 @@ func (a *API) handleContent(w http.ResponseWriter, r *http.Request) {
 func (a *API) handleContentGet(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Check if node is in active window
+	if !a.scheduler.Active() {
+		http.Error(w, "node is idle", http.StatusServiceUnavailable)
 		return
 	}
 
