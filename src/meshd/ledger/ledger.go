@@ -205,16 +205,26 @@ func (d *DB) RecordStop(id int64) error {
 
 // UptimeToday returns the number of minutes the node has been online today.
 func (d *DB) UptimeToday() (int64, error) {
-	today := epochStart(epochID(time.Now()))
+	todayStart := epochStart(epochID(time.Now()))
+	todayEnd := todayStart + 86400
 	now := time.Now().Unix()
+
+	// Cap end time at now (not future)
+	if now < todayEnd {
+		todayEnd = now
+	}
+
 	var minutes int64
 	err := d.sql.QueryRow(`
 		SELECT COALESCE(SUM(
 			(MIN(COALESCE(stopped_at, ?), ?) - MAX(started_at, ?)) / 60
 		), 0)
 		FROM node_uptime
-		WHERE started_at < ? AND (stopped_at IS NULL OR stopped_at > ?)`,
-		now, now, today, now, today,
+		WHERE started_at < ? AND (stopped_at IS NULL OR stopped_at > ?)
+		AND (MIN(COALESCE(stopped_at, ?), ?) - MAX(started_at, ?)) > 0`,
+		todayEnd, todayEnd, todayStart,
+		todayEnd, todayStart,
+		todayEnd, todayEnd, todayStart,
 	).Scan(&minutes)
 	if err != nil {
 		return 0, fmt.Errorf("querying uptime: %w", err)
