@@ -15,6 +15,7 @@ import (
 
 	"meshd/config"
 	"meshd/ledger"
+	"meshd/limits"
 	"meshd/node"
 	"meshd/scheduler"
 	"meshd/server"
@@ -49,6 +50,13 @@ func main() {
 		cfg.Dev = true
 		log.Println("running in development mode")
 	}
+
+	// Set low OS priority — meshd runs as a background process
+	limits.SetLowPriority()
+
+	// Initialise resource limiter
+	limiter := limits.New(cfg)
+	_ = limiter // will be passed to server in next step
 
 	if *initMode {
 		if err := node.Init(cfg); err != nil {

@@ -54,6 +54,7 @@ type NetworkConfig struct {
 type LimitsConfig struct {
 	CPUPercent    int  `yaml:"cpu_percent"`
 	RAMMB         int  `yaml:"ram_mb"`
+	BandwidthMbps int  `yaml:"bandwidth_mbps"`
 	BatteryMinPct int  `yaml:"battery_min_percent"`
 	WiFiOnly      bool `yaml:"wifi_only"`
 }
@@ -125,6 +126,7 @@ func defaultConfig() *Config {
 		Limits: LimitsConfig{
 			CPUPercent:    25,
 			RAMMB:         256,
+			BandwidthMbps: 5,
 			BatteryMinPct: 30,
 			WiFiOnly:      false,
 		},
