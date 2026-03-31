@@ -92,19 +92,19 @@ PiN does not require a fast connection. A 5 Mbps upload is more than sufficient 
 - [x] Public GitHub repository
 - [x] Architecture specification
 - [x] Community announcement
-- [ ] Discord server open
+- [X] Discord server open
 
 ### Phase 1 — Core daemon (March → April 2025)
-- [ ] `meshd` daemon in Go — static file serving, peer discovery, DHT routing
-- [ ] Raspberry Pi OS image — single flash setup
-- [ ] CLI tools for node management
-- [ ] Local Hash ledger (SQLite)
+- [X] `meshd` daemon in Go — static file serving, peer discovery, DHT routing
+- [X] Raspberry Pi OS image — single flash setup
+- [X] CLI tools for node management
+- [X] Local Hash ledger (SQLite)
 
 ### Phase 2 — Soft nodes and scheduler (May → June 2025)
-- [ ] Desktop tray app (Tauri) for Windows, macOS, Linux
-- [ ] Resource control UI — CPU cap, RAM limit, storage share, schedule
-- [ ] Battery and network rules for mobile devices
-- [ ] Hash ledger v1 sync across nodes
+- [X] Desktop tray app (Tauri) for Windows, macOS, Linux
+- [X] Resource control UI — CPU cap, RAM limit, storage share, schedule
+- [X] Battery and network rules for mobile devices
+- [X] Hash ledger v1 sync across nodes
 
 ### Phase 3 — PiN browser alpha (July → September 2025)
 - [ ] Browser shell with built-in mesh resolver
