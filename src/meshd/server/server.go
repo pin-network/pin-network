@@ -27,8 +27,8 @@ type API struct {
 	store     *store.Store
 	fetcher   *fetcher.Fetcher
 	scheduler *scheduler.Scheduler
-	mux       *http.ServeMux
 	limiter   *limits.Limiter
+	mux       *http.ServeMux
 }
 
 // NewAPI creates a new API server.
@@ -60,6 +60,8 @@ func (a *API) registerRoutes() {
 	a.mux.HandleFunc("/api/v1/ledger", a.handleLedger)
 	a.mux.HandleFunc("/api/v1/content", a.handleContent)
 	a.mux.HandleFunc("/api/v1/content/", a.handleContentGet)
+	a.mux.HandleFunc("/api/v1/domain", a.handleDomainList)
+	a.mux.HandleFunc("/api/v1/domain/", a.handleDomain)
 }
 
 // StatusResponse is the response for GET /api/v1/status.
@@ -250,6 +252,81 @@ func (a *API) handleContentGet(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-CID", cid)
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Write(data)
+}
+
+// DomainRegisterRequest is the request body for POST /api/v1/domain.
+type DomainRegisterRequest struct {
+	Name     string `json:"name"`
+	CID      string `json:"cid"`
+	TTLHours int    `json:"ttl_hours"`
+}
+
+// DomainResponse is the response for domain operations.
+type DomainResponse struct {
+	Name      string `json:"name"`
+	CID       string `json:"cid"`
+	OwnerID   string `json:"owner_id"`
+	ExpiresAt int64  `json:"expires_at"`
+}
+
+func (a *API) handleDomainList(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		domains, err := a.db.ListDomains(a.node.ID())
+		if err != nil {
+			http.Error(w, "ledger error", http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, domains)
+
+	case http.MethodPost:
+		var req DomainRegisterRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid request body", http.StatusBadRequest)
+			return
+		}
+		if req.Name == "" || req.CID == "" {
+			http.Error(w, "name and cid are required", http.StatusBadRequest)
+			return
+		}
+		if req.TTLHours == 0 {
+			req.TTLHours = 48
+		}
+		if err := a.db.RegisterDomain(req.Name, req.CID, a.node.ID(), req.TTLHours); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, DomainResponse{
+			Name:    req.Name,
+			CID:     req.CID,
+			OwnerID: a.node.ID(),
+		})
+
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (a *API) handleDomain(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	name := strings.TrimPrefix(r.URL.Path, "/api/v1/domain/")
+	if name == "" {
+		http.Error(w, "missing domain name", http.StatusBadRequest)
+		return
+	}
+
+	cid, err := a.db.ResolveDomain(name)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/plain")
+	w.Write([]byte(cid))
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

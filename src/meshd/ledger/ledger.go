@@ -36,6 +36,16 @@ type EpochSummary struct {
 	Tier          int
 }
 
+// DomainRecord holds a registered .pin domain.
+type DomainRecord struct {
+	Name      string `json:"name"`
+	CID       string `json:"cid"`
+	OwnerID   string `json:"owner_id"`
+	CreatedAt int64  `json:"created_at"`
+	UpdatedAt int64  `json:"updated_at"`
+	ExpiresAt int64  `json:"expires_at"`
+}
+
 // Open opens (or creates) the ledger database at the given path.
 func Open(path string) (*DB, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
@@ -127,6 +137,66 @@ func (d *DB) RecentTraffic(limit int) ([]TrafficRecord, error) {
 	return records, nil
 }
 
+// RegisterDomain registers or updates a .pin domain name.
+func (d *DB) RegisterDomain(name, cid, ownerID string, ttlHours int) error {
+	now := time.Now().Unix()
+	expires := now + int64(ttlHours*3600)
+	_, err := d.sql.Exec(`
+		INSERT INTO domains (name, cid, owner_id, created_at, updated_at, expires_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(name) DO UPDATE SET
+			cid = excluded.cid,
+			updated_at = excluded.updated_at,
+			expires_at = excluded.expires_at
+		WHERE owner_id = excluded.owner_id`,
+		name, cid, ownerID, now, now, expires,
+	)
+	if err != nil {
+		return fmt.Errorf("registering domain %s: %w", name, err)
+	}
+	return nil
+}
+
+// ResolveDomain looks up a .pin domain and returns its CID.
+func (d *DB) ResolveDomain(name string) (string, error) {
+	var cid string
+	err := d.sql.QueryRow(`
+		SELECT cid FROM domains
+		WHERE name = ? AND expires_at > ?`,
+		name, time.Now().Unix(),
+	).Scan(&cid)
+	if err == sql.ErrNoRows {
+		return "", fmt.Errorf("domain %s not found", name)
+	}
+	if err != nil {
+		return "", fmt.Errorf("resolving domain %s: %w", name, err)
+	}
+	return cid, nil
+}
+
+// ListDomains returns all registered domains owned by this node.
+func (d *DB) ListDomains(ownerID string) ([]DomainRecord, error) {
+	rows, err := d.sql.Query(`
+		SELECT name, cid, owner_id, created_at, updated_at, expires_at
+		FROM domains WHERE owner_id = ? AND expires_at > ?
+		ORDER BY name`, ownerID, time.Now().Unix())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var records []DomainRecord
+	for rows.Next() {
+		var r DomainRecord
+		if err := rows.Scan(&r.Name, &r.CID, &r.OwnerID,
+			&r.CreatedAt, &r.UpdatedAt, &r.ExpiresAt); err != nil {
+			return nil, err
+		}
+		records = append(records, r)
+	}
+	return records, nil
+}
+
 // migrate creates the database schema if it does not exist.
 func (d *DB) migrate() error {
 	schema := `
@@ -157,6 +227,17 @@ func (d *DB) migrate() error {
 		started_at INTEGER NOT NULL,
 		stopped_at INTEGER
 	);
+
+	CREATE TABLE IF NOT EXISTS domains (
+		name        TEXT PRIMARY KEY,
+		cid         TEXT NOT NULL,
+		owner_id    TEXT NOT NULL,
+		created_at  INTEGER NOT NULL,
+		updated_at  INTEGER NOT NULL,
+		expires_at  INTEGER NOT NULL
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_domains_cid ON domains(cid);
 	`
 
 	if _, err := d.sql.Exec(schema); err != nil {
@@ -209,7 +290,6 @@ func (d *DB) UptimeToday() (int64, error) {
 	todayEnd := todayStart + 86400
 	now := time.Now().Unix()
 
-	// Cap end time at now (not future)
 	if now < todayEnd {
 		todayEnd = now
 	}
