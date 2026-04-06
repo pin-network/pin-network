@@ -14,6 +14,7 @@ import (
 	"meshd/fetcher"
 	"meshd/ledger"
 	"meshd/limits"
+	"meshd/manifest"
 	"meshd/node"
 	"meshd/scheduler"
 	"meshd/store"
@@ -62,6 +63,7 @@ func (a *API) registerRoutes() {
 	a.mux.HandleFunc("/api/v1/content/", a.handleContentGet)
 	a.mux.HandleFunc("/api/v1/domain", a.handleDomainList)
 	a.mux.HandleFunc("/api/v1/domain/", a.handleDomain)
+	a.mux.HandleFunc("/api/v1/publish", a.handlePublish)
 }
 
 // StatusResponse is the response for GET /api/v1/status.
@@ -198,13 +200,11 @@ func (a *API) handleContentGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if node is in active window
 	if !a.scheduler.Active() {
 		http.Error(w, "node is idle", http.StatusServiceUnavailable)
 		return
 	}
 
-	// Acquire concurrency slot
 	if err := a.limiter.Acquire(r.Context()); err != nil {
 		http.Error(w, "server busy", http.StatusServiceUnavailable)
 		return
@@ -217,7 +217,6 @@ func (a *API) handleContentGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Try local store first
 	data, err := a.store.Get(cid)
 	if err != nil {
 		if err != os.ErrNotExist {
@@ -225,7 +224,6 @@ func (a *API) handleContentGet(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Not found locally — try peers
 		if len(a.cfg.Network.PeerAPIs) > 0 {
 			log.Printf("CID %s not found locally, trying %d peers", cid[:8], len(a.cfg.Network.PeerAPIs))
 			data, _, err = a.fetcher.FetchFromPeers(a.cfg.Network.PeerAPIs, cid)
@@ -235,7 +233,6 @@ func (a *API) handleContentGet(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
-			// Cache locally for future requests
 			if _, cacheErr := a.store.Put(data); cacheErr != nil {
 				log.Printf("warning: could not cache CID %s: %v", cid[:8], cacheErr)
 			} else {
@@ -327,6 +324,74 @@ func (a *API) handleDomain(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/plain")
 	w.Write([]byte(cid))
+}
+
+func (a *API) handlePublish(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req manifest.PublishRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if req.Name == "" {
+		http.Error(w, "name is required", http.StatusBadRequest)
+		return
+	}
+	if len(req.Files) == 0 {
+		http.Error(w, "at least one file is required", http.StatusBadRequest)
+		return
+	}
+	if req.TTLHours == 0 {
+		req.TTLHours = manifest.DefaultTTLHours
+	}
+
+	m := manifest.New(req.Name)
+	m.Description = req.Description
+
+	var entries []manifest.FileEntry
+	for _, f := range req.Files {
+		cid, err := a.store.Put(f.Content)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("storing file %s: %v", f.Path, err), http.StatusInternalServerError)
+			return
+		}
+		m.AddFile(f.Path, cid, int64(len(f.Content)), f.MIME)
+		entries = append(entries, manifest.FileEntry{
+			Path: f.Path,
+			CID:  cid,
+			Size: int64(len(f.Content)),
+			MIME: f.MIME,
+		})
+	}
+
+	manifestData, err := m.Marshal()
+	if err != nil {
+		http.Error(w, "creating manifest", http.StatusInternalServerError)
+		return
+	}
+	manifestCID, err := a.store.Put(manifestData)
+	if err != nil {
+		http.Error(w, "storing manifest", http.StatusInternalServerError)
+		return
+	}
+
+	if err := a.db.RegisterDomain(req.Name, manifestCID, a.node.ID(), req.TTLHours); err != nil {
+		http.Error(w, fmt.Sprintf("registering domain: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("published %s — manifest CID %s (%d files)", req.Name, manifestCID[:8], len(req.Files))
+
+	writeJSON(w, manifest.PublishResponse{
+		Name:        req.Name,
+		ManifestCID: manifestCID,
+		Files:       entries,
+		TTLHours:    req.TTLHours,
+	})
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
