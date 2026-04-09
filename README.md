@@ -128,7 +128,7 @@ PiN does not require a fast connection. A 5 Mbps upload is more than sufficient 
 
 ## Getting started
 
-> Phase 1 is under active development. Star and watch this repo to be notified when the first release drops.
+> Phase 3 is under active development. Star and watch this repo to be notified when the first release drops.
 
 ### For Raspberry Pi (coming Phase 1)
 
