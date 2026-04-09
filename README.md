@@ -86,30 +86,73 @@ PiN does not require a fast connection. A 5 Mbps upload is more than sufficient 
 
 ---
 
+## Progress
+
+### What is built and working
+
+The core daemon (`meshd`) and the browser resolver (`pin-browser`) are both functional. The following components exist in `src/`:
+
+| Component | Location | Status |
+|-----------|----------|--------|
+| `meshd` daemon | `src/meshd/` | ✅ Working |
+| libp2p peer mesh + Kad DHT | `src/meshd/node/` | ✅ Working |
+| Local HTTP API | `src/meshd/server/` | ✅ Working |
+| Content-addressed store | `src/meshd/store/` | ✅ Working |
+| `.pin` site manifest format | `src/meshd/manifest/` | ✅ Working |
+| Domain registration + resolution | `src/meshd/server/` | ✅ Working |
+| Site publish endpoint (`POST /api/v1/publish`) | `src/meshd/server/` | ✅ Working |
+| Hash ledger (SQLite, epoch calculator) | `src/meshd/ledger/` | ✅ Working |
+| Resource limits (CPU, RAM, bandwidth) | `src/meshd/limits/` | ✅ Working |
+| Activity scheduler (active hours, idle ramp) | `src/meshd/scheduler/` | ✅ Working |
+| YAML config with defaults | `src/meshd/config/` | ✅ Working |
+| `pin-browser` shell + `.pin` resolver | `src/pin-browser/` | ✅ Working |
+| Headless proxy mode | `src/pin-browser/browser/` | ✅ Working |
+
+### API endpoints (meshd v0.1.0-dev)
+
+`meshd` exposes a local REST API on port **4002** by default:
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/v1/status` | Node status, peer count, uptime |
+| `GET` | `/api/v1/peers` | Connected peers |
+| `GET` | `/api/v1/ledger` | Hash balance and epoch history |
+| `POST` | `/api/v1/content` | Store a blob, returns CID |
+| `GET` | `/api/v1/content/{cid}` | Retrieve a blob by CID (with peer fallback) |
+| `GET` | `/api/v1/domain` | List registered `.pin` domains |
+| `GET/PUT/DELETE` | `/api/v1/domain/{name}` | Get, register, or delete a domain |
+| `POST` | `/api/v1/publish` | Publish a full `.pin` site from JSON payload |
+
+---
+
 ## Roadmap
 
 ### Phase 0 — Launch (March 14, 2025 — PI Day)
 - [x] Public GitHub repository
 - [x] Architecture specification
 - [x] Community announcement
-- [X] Discord server open
+- [x] Discord server open
 
 ### Phase 1 — Core daemon (March → April 2025)
-- [X] `meshd` daemon in Go — static file serving, peer discovery, DHT routing
-- [X] Raspberry Pi OS image — single flash setup
-- [X] CLI tools for node management
-- [X] Local Hash ledger (SQLite)
+- [x] `meshd` daemon in Go — static file serving, peer discovery, DHT routing
+- [x] CLI flags for node init, dev mode, and version
+- [x] Local Hash ledger (SQLite) with epoch-based reward calculation
+- [x] Content-addressed blob store (SHA-256 CID)
+- [x] `.pin` site manifest format with CID integrity
+- [x] Domain registration and resolution API
+- [x] Site publish endpoint — full `.pin` sites uploadable via API
+- [x] Resource limits (CPU, RAM, bandwidth caps)
+- [x] Activity scheduler — active-hours windows and idle ramp
 
 ### Phase 2 — Soft nodes and scheduler (May → June 2025)
-- [X] Desktop tray app (Tauri) for Windows, macOS, Linux
-- [X] Resource control UI — CPU cap, RAM limit, storage share, schedule
-- [X] Battery and network rules for mobile devices
-- [X] Hash ledger v1 sync across nodes
+- [x] `pin-browser` shell — WebView wrapper with built-in `.pin` resolver
+- [x] Headless proxy mode for displays-free nodes (RPi without monitor)
+- [x] Battery and network rules for mobile devices
+- [x] Hash ledger v1 sync across nodes
 
 ### Phase 3 — PiN browser alpha (July → September 2025)
-- [ ] Browser shell with built-in mesh resolver
-- [ ] `.pin` TLD support
-- [ ] Hash wallet UI
+- [ ] Full browser UI with Hash wallet toolbar
+- [ ] `.pin` TLD support visible to end users
 - [ ] Android and iOS beta
 
 ### Phase 4 — Connectivity and rural (October → December 2025)
@@ -126,37 +169,224 @@ PiN does not require a fast connection. A 5 Mbps upload is more than sufficient 
 
 ---
 
-## Getting started
+## Developer quick-start
 
-> Phase 1 is under active development. Star and watch this repo to be notified when the first release drops.
+### Prerequisites
 
-### For Raspberry Pi (coming Phase 1)
+| Tool | Version | Required for |
+|------|---------|-------------|
+| Go | 1.22+ | `meshd`, `pin-browser` |
+| Git | any | cloning the repo |
+| GCC / build tools | any | CGo (SQLite) |
+| Raspberry Pi OS Lite | Bookworm | RPi hardware testing |
+
+On Debian / Ubuntu / Raspberry Pi OS:
 
 ```bash
-# Flash the PiN image to your SD card using Raspberry Pi Imager
-# Select "PiN OS" from the custom image option
-# Boot your Pi — meshd starts automatically
-# Open the PiN browser on any device and navigate to your node's .pin address
+sudo apt update && sudo apt install -y golang git build-essential
 ```
 
-### For desktop / laptop (coming Phase 2)
+On macOS (Homebrew):
 
 ```bash
-# Download the PiN tray app for your OS from the releases page
-# Install and launch — the daemon runs in the background
-# Set your resource schedule in the tray icon preferences
-# Start earning Hashes immediately
+brew install go git
 ```
 
-### Build from source (developers)
+On Windows, install [Go](https://go.dev/dl/) and [Git for Windows](https://gitforwindows.org/). CGo requires a C toolchain — install [TDM-GCC](https://jmeubank.github.io/tdm-gcc/) or enable WSL.
+
+---
+
+### Clone the repository
 
 ```bash
-git clone https://github.com/justj1979/pin-network.git
+git clone https://github.com/pin-network/pin-network.git
 cd pin-network
-# Requires Go 1.22+
+```
+
+---
+
+### Build and run meshd (node daemon)
+
+```bash
 cd src/meshd
+
+# Download dependencies
+go mod download
+
+# Build the daemon binary
 go build -o meshd .
+
+# Initialise a new node identity (creates ~/.pin/config.yaml and a keypair)
 ./meshd --init
+
+# Start the daemon in development mode (verbose logging)
+./meshd --dev
+```
+
+The daemon starts two listeners:
+
+- **Mesh port `4001`** — libp2p peer-to-peer connections
+- **API port `4002`** — local REST API used by the browser and CLI tools
+
+Check that it is running:
+
+```bash
+curl http://localhost:4002/api/v1/status
+```
+
+#### Optional: Windows PowerShell helper
+
+A convenience script is included that sets `CGO_ENABLED=1` and kills any leftover port bindings before launching in dev mode:
+
+```powershell
+cd src/meshd
+.\run.ps1
+```
+
+---
+
+### Build and run pin-browser
+
+The `pin-browser` requires a running `meshd` instance. Start `meshd` first, then in a second terminal:
+
+```bash
+cd src/pin-browser
+
+# Download dependencies
+go mod download
+
+# Build the browser binary
+go build -o pin-browser .
+
+# Launch with a UI (requires a display)
+./pin-browser
+
+# Launch in headless proxy mode (no display needed — useful on RPi without monitor)
+# Starts an HTTP proxy on port 7070 that routes .pin requests through the local node
+./pin-browser --headless
+```
+
+Point the browser at your local node's API if it is not on the default address:
+
+```bash
+./pin-browser --api 127.0.0.1:4002
+```
+
+---
+
+### Raspberry Pi setup
+
+The following instructions get `meshd` running on a freshly flashed Raspberry Pi.
+
+#### 1. Flash Raspberry Pi OS Lite
+
+Use [Raspberry Pi Imager](https://www.raspberrypi.com/software/) to flash **Raspberry Pi OS Lite (64-bit, Bookworm)** to an SD card. In the Imager settings, configure your WiFi credentials and enable SSH before writing.
+
+#### 2. Boot and connect
+
+```bash
+ssh pi@<your-pi-ip>
+```
+
+#### 3. Install Go and build tools
+
+```bash
+sudo apt update && sudo apt install -y build-essential
+
+# Download and install Go (adjust version/arch as needed)
+wget https://go.dev/dl/go1.22.0.linux-arm64.tar.gz
+sudo tar -C /usr/local -xzf go1.22.0.linux-arm64.tar.gz
+echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc
+source ~/.bashrc
+go version
+```
+
+#### 4. Clone and build meshd
+
+```bash
+git clone https://github.com/pin-network/pin-network.git
+cd pin-network/src/meshd
+go mod download
+go build -o meshd .
+```
+
+#### 5. Initialise and start the node
+
+```bash
+./meshd --init
+./meshd
+```
+
+#### 6. (Optional) Run as a systemd service so it starts on boot
+
+```bash
+sudo tee /etc/systemd/system/meshd.service > /dev/null <<EOF
+[Unit]
+Description=PiN meshd node daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/home/pi/pin-network/src/meshd/meshd
+Restart=on-failure
+User=pi
+WorkingDirectory=/home/pi
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now meshd
+sudo systemctl status meshd
+```
+
+#### 7. Run pin-browser in headless proxy mode
+
+On a Pi without a monitor, run the browser as a proxy that other devices on your network can use to reach `.pin` sites:
+
+```bash
+cd ~/pin-network/src/pin-browser
+go build -o pin-browser .
+./pin-browser --headless
+# Now listening on :7070
+```
+
+---
+
+### Configuration reference
+
+`meshd` reads `~/.pin/config.yaml` on start. If the file does not exist, defaults are used. Run `./meshd --init` to create it.
+
+```yaml
+node:
+  tier: 1                        # 1 = RPi/SBC, 2 = laptop/phone, 3 = desktop/NAS
+  storage_path: ~/.pin/store     # where content blobs are stored
+  storage_limit_gb: 10           # maximum storage pledged to the network
+  bandwidth_limit_mbps: 5        # maximum upload bandwidth
+
+schedule:
+  always_on: true                # set false to use active_hours windows
+  active_hours:
+    - start: "08:00"
+      end: "22:00"
+  idle_threshold_pct: 20         # ramp up resources when below this utilisation %
+
+network:
+  listen_port: 4001              # libp2p peer port
+  api_port: 4002                 # local REST API port
+  enable_upnp: true
+  enable_relay: true
+  bootstrap_nodes:
+    - /dns4/bootstrap.pin.network/tcp/4001/p2p/QmPlaceholderBootstrapID
+  peer_apis: []                  # optional list of known peer API URLs for content fallback
+
+limits:
+  cpu_percent: 25                # maximum CPU the daemon may use
+  ram_mb: 256                    # maximum RAM the daemon may use
+  bandwidth_mbps: 5              # maximum bandwidth the daemon may use
+  battery_min_percent: 30        # pause when battery drops below this level
+  wifi_only: false               # only run when connected to WiFi
 ```
 
 ---
@@ -166,11 +396,11 @@ go build -o meshd .
 | Component | Technology | Why |
 |-----------|-----------|-----|
 | Node daemon | Go | Single static binary, cross-compiles to ARM, excellent networking primitives |
-| Peer mesh | libp2p | Battle-tested DHT, NAT hole-punching, transport encryption |
-| Web serving | nginx (embedded) | 2MB RAM at idle, gold standard performance |
-| Local ledger | SQLite | Zero configuration, runs on every platform |
-| Desktop app | Tauri (Rust + WebView) | 3–10MB binary vs 150MB Electron, cross-platform |
-| RPI image | Raspberry Pi OS Lite + pi-gen | Official toolchain, single-flash experience |
+| Peer mesh | libp2p + Kad DHT | Battle-tested DHT, NAT hole-punching, transport encryption |
+| Content store | SHA-256 CID (custom) | Minimal, no external dependencies, content-integrity by default |
+| Local ledger | SQLite (modernc, pure Go) | Zero configuration, runs on every platform without CGo issues |
+| Browser shell | Go + WebView (`webview_go`) | Lightweight native window, zero Electron overhead |
+| Config | YAML | Human-readable, easy to hand-edit on a Pi |
 
 ---
 
@@ -182,7 +412,7 @@ See [SPEC.md](docs/SPEC.md) for the full technical specification including the D
 
 ## Contributing
 
-PiN is built by its community. Every skill level is welcome — from flashing Pi images to designing protocols to writing documentation.
+PiN is built by its community. Every skill level is welcome — from running nodes on real hardware to designing protocols to writing documentation.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for how to get involved, claim work, and submit changes.
 
@@ -199,8 +429,8 @@ The PiN name, logo, and "Are you IN?" mark are project identifiers. The software
 ## Community
 
 - **GitHub Discussions** — questions, ideas, and architecture debate
-- **Discord** — coming March 14, link posted here on launch day
-- **Reddit** — [r/pinnetwork](https://reddit.com/r/pinnetwork) (launching PI Day)
+- **Discord** — link in the repository description
+- **Reddit** — [r/pinnetwork](https://reddit.com/r/pinnetwork)
 
 ---
 
