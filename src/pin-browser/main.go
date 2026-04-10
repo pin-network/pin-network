@@ -1,4 +1,5 @@
-// PiN Browser — Pi Integrated Network
+// pin-browser — PiN Browser backend
+// Pi Integrated Network
 // https://github.com/pin-network/pin-network
 package main
 
@@ -15,9 +16,9 @@ import (
 )
 
 var (
-	apiAddr  = flag.String("api", "127.0.0.1:4002", "meshd API address")
-	headless = flag.Bool("headless", false, "Run in headless proxy mode (no UI)")
-	version  = flag.Bool("version", false, "Print version and exit")
+	apiAddr = flag.String("api", "127.0.0.1:4002", "meshd API address")
+	port    = flag.Int("port", 7070, "browser proxy port")
+	version = flag.Bool("version", false, "Print version and exit")
 )
 
 func main() {
@@ -33,7 +34,6 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Handle shutdown signals
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
@@ -43,8 +43,8 @@ func main() {
 	}()
 
 	b := browser.New(browser.Config{
-		APIAddr:  *apiAddr,
-		Headless: *headless,
+		APIAddr: *apiAddr,
+		Port:    *port,
 	})
 
 	if err := b.Start(ctx); err != nil {

@@ -1,6 +1,4 @@
 // Package resolver handles .pin domain resolution through the local meshd API.
-// It is the core of the PiN browser — intercepting .pin requests and routing
-// them through the mesh while passing everything else to normal DNS.
 package resolver
 
 import (
@@ -12,13 +10,8 @@ import (
 )
 
 const (
-	// PinTLD is the mesh top-level domain.
-	PinTLD = ".pin"
-
-	// DefaultAPIAddr is the local meshd API address.
+	PinTLD         = ".pin"
 	DefaultAPIAddr = "127.0.0.1:4002"
-
-	// MaxContentSize is the maximum content size we'll fetch (50MB).
 	MaxContentSize = 50 * 1024 * 1024
 )
 
@@ -37,67 +30,49 @@ type Response struct {
 	StatusCode  int
 }
 
-// New creates a new Resolver pointing at the local meshd API.
+// New creates a new Resolver.
 func New(apiAddr string) *Resolver {
 	if apiAddr == "" {
 		apiAddr = DefaultAPIAddr
 	}
 	return &Resolver{
 		apiAddr: apiAddr,
-		client: &http.Client{
-			Timeout: 30 * time.Second,
-		},
+		client:  &http.Client{Timeout: 30 * time.Second},
 	}
 }
 
 // IsPinURL returns true if the URL targets a .pin domain.
 func IsPinURL(url string) bool {
-	// Normalize — strip scheme
 	u := strings.ToLower(url)
-	u = strings.TrimPrefix(u, "http://")
-	u = strings.TrimPrefix(u, "https://")
-	u = strings.TrimPrefix(u, "pin://")
-
-	// Check if the host ends in .pin
+	for _, scheme := range []string{"http://", "https://", "pin://"} {
+		u = strings.TrimPrefix(u, scheme)
+	}
 	host := strings.SplitN(u, "/", 2)[0]
-	host = strings.SplitN(host, ":", 2)[0] // strip port
+	host = strings.SplitN(host, ":", 2)[0]
 	return strings.HasSuffix(host, PinTLD)
 }
 
 // Resolve fetches content for a .pin URL from the local meshd node.
-// For non-.pin URLs it returns nil and the caller should use normal HTTP.
 func (r *Resolver) Resolve(url string) (*Response, error) {
 	if !IsPinURL(url) {
 		return nil, nil
 	}
 
-	// Parse the .pin URL into domain and path
 	domain, path := parsePinURL(url)
 
-	// Step 1 — resolve the domain to a CID via meshd
-	cid, err := r.resolveDomain(domain)
+	manifestCID, err := r.resolveDomain(domain)
 	if err != nil {
 		return nil, fmt.Errorf("resolving .pin domain %s: %w", domain, err)
 	}
 
-	// Step 2 — if path is not empty, resolve the specific file CID
-	// For now we fetch the manifest CID and serve the entrypoint
-	// Full path resolution comes in Phase 3.2
-	targetCID := cid
-	if path != "" && path != "/" {
-		targetCID, err = r.resolvePathCID(cid, path)
-		if err != nil {
-			// Fall back to root CID
-			targetCID = cid
-		}
+	if path == "" || path == "/" {
+		return r.fetchManifestEntrypoint(manifestCID)
 	}
 
-	// Step 3 — fetch the content by CID
-	return r.fetchCID(targetCID)
+	return r.fetchManifestPath(manifestCID, path)
 }
 
-// ResolveCID fetches content directly by CID from the local meshd node.
-// Used when the browser has a direct CID reference.
+// ResolveCID fetches content directly by CID.
 func (r *Resolver) ResolveCID(cid string) (*Response, error) {
 	return r.fetchCID(cid)
 }
@@ -112,8 +87,6 @@ func (r *Resolver) Healthy() bool {
 	return resp.StatusCode == http.StatusOK
 }
 
-// resolveDomain looks up a .pin domain name in the meshd DHT
-// and returns the root CID for that domain.
 func (r *Resolver) resolveDomain(domain string) (string, error) {
 	url := fmt.Sprintf("http://%s/api/v1/domain/%s", r.apiAddr, domain)
 	resp, err := r.client.Get(url)
@@ -134,27 +107,64 @@ func (r *Resolver) resolveDomain(domain string) (string, error) {
 		return "", fmt.Errorf("reading domain response: %w", err)
 	}
 
-	// Response is a plain CID string for now
-	// Will be JSON manifest in Phase 3.2
 	cid := strings.TrimSpace(string(body))
 	if cid == "" {
 		return "", fmt.Errorf("empty CID returned for domain %s", domain)
 	}
-
 	return cid, nil
 }
 
-// resolvePathCID resolves a specific file path within a .pin site.
-// Takes the root manifest CID and a path, returns the file's CID.
-func (r *Resolver) resolvePathCID(manifestCID, path string) (string, error) {
-	// Phase 3.2 — manifest parsing and path resolution
-	// For now return the manifest CID as a fallback
-	_ = manifestCID
-	_ = path
-	return manifestCID, nil
+// fetchManifestEntrypoint fetches a manifest and returns its entrypoint content.
+func (r *Resolver) fetchManifestEntrypoint(manifestCID string) (*Response, error) {
+	manifestResp, err := r.fetchCID(manifestCID)
+	if err != nil {
+		return nil, fmt.Errorf("fetching manifest: %w", err)
+	}
+
+	// Always try to parse as manifest JSON regardless of content type
+	body := string(manifestResp.Body)
+	if idx := strings.Index(body, `"entrypoint": "`); idx >= 0 {
+		start := idx + len(`"entrypoint": "`)
+		end := strings.Index(body[start:], `"`)
+		if end >= 0 {
+			entrypointCID := body[start : start+end]
+			if entrypointCID != "" {
+				return r.fetchCID(entrypointCID)
+			}
+		}
+	}
+
+	// Not a manifest or no entrypoint — return as-is
+	return manifestResp, nil
 }
 
-// fetchCID retrieves content by CID from the local meshd node.
+// fetchManifestPath fetches a specific file path from a manifest.
+func (r *Resolver) fetchManifestPath(manifestCID, path string) (*Response, error) {
+	manifestResp, err := r.fetchCID(manifestCID)
+	if err != nil {
+		return nil, fmt.Errorf("fetching manifest: %w", err)
+	}
+
+	if len(path) > 0 && path[0] == '/' {
+		path = path[1:]
+	}
+
+	body := string(manifestResp.Body)
+	searchKey := fmt.Sprintf(`"path":"%s"`, path)
+	if idx := strings.Index(body, searchKey); idx >= 0 {
+		cidKey := `"cid":"`
+		if cidIdx := strings.Index(body[idx:], cidKey); cidIdx >= 0 {
+			start := idx + cidIdx + len(cidKey)
+			end := strings.Index(body[start:], `"`)
+			if end >= 0 {
+				return r.fetchCID(body[start : start+end])
+			}
+		}
+	}
+
+	return r.fetchManifestEntrypoint(manifestCID)
+}
+
 func (r *Resolver) fetchCID(cid string) (*Response, error) {
 	url := fmt.Sprintf("http://%s/api/v1/content/%s", r.apiAddr, cid)
 	resp, err := r.client.Get(url)
@@ -164,7 +174,7 @@ func (r *Resolver) fetchCID(cid string) (*Response, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusServiceUnavailable {
-		return nil, fmt.Errorf("mesh node is idle — content serving paused")
+		return nil, fmt.Errorf("mesh node is idle")
 	}
 	if resp.StatusCode == http.StatusNotFound {
 		return nil, fmt.Errorf("content %s not found in mesh", cid)
@@ -192,15 +202,11 @@ func (r *Resolver) fetchCID(cid string) (*Response, error) {
 	}, nil
 }
 
-// parsePinURL extracts the domain and path from a .pin URL.
 func parsePinURL(url string) (domain, path string) {
-	// Strip scheme
 	u := url
 	for _, scheme := range []string{"pin://", "http://", "https://"} {
 		u = strings.TrimPrefix(u, scheme)
 	}
-
-	// Split host and path
 	parts := strings.SplitN(u, "/", 2)
 	host := parts[0]
 	if len(parts) > 1 {
@@ -208,8 +214,6 @@ func parsePinURL(url string) (domain, path string) {
 	} else {
 		path = "/"
 	}
-
-	// Strip port from host
 	domain = strings.SplitN(host, ":", 2)[0]
 	return domain, path
 }
